@@ -1,427 +1,336 @@
-import * as PIXI from 'pixi.js'
-import { Subject } from 'rxjs'
-import { GameWorld } from '../types'
-import { 
-  Position, 
-  Sprite, 
-  Monster, 
-  Health, 
-  Collider, 
-  PlayerControlled 
-} from '../components'
-import { monsterQuery } from '../queries'
+import * as PIXI from 'pixi.js';
+import { GameEvent } from '../game';
+import { MonsterSprites } from './monster-sprites';
+import { EffectsManager } from './effects';
+import { UIManager } from './ui-manager';
+import { Subject } from 'rxjs';
 
-export interface RendererConfig {
-  width: number
-  height: number
-  backgroundColor: number
-  antialias: boolean
-  resolution: number
-  parentElement?: HTMLElement
+export interface RendererOptions {
+  width: number;
+  height: number;
+  backgroundColor?: number;
+  parentElement?: HTMLElement;
+  antialias?: boolean;
+  transparent?: boolean;
 }
 
-export interface RenderEvent {
-  type: string
-  data: any
-}
-
-// Define interfaces for extended PIXI objects
-interface ExtendedSprite extends PIXI.Sprite {
-  vx?: number;
-  vy?: number;
+export interface RendererEvent {
+  type: string;
+  data: any;
 }
 
 export class PixiRenderer {
-  private app: PIXI.Application | null = null
-  private world: GameWorld | null = null
-  private entitySprites: Map<number, PIXI.Container> = new Map()
-  private textures: Map<string, PIXI.Texture> = new Map()
-  private monsterColors: number[] = [
-    0xFF5733, // Red
-    0x33FF57, // Green
-    0x3357FF, // Blue
-    0xF3FF33, // Yellow
-    0xFF33F3  // Purple
-  ]
-  private isInitialized: boolean = false
-  private config: RendererConfig
+  private app: PIXI.Application;
+  private monsterSprites: MonsterSprites;
+  private effectsManager: EffectsManager;
+  private uiManager: UIManager;
+  private entitySprites: Map<number, PIXI.DisplayObject> = new Map();
+  private isDestroyed: boolean = false;
+  private canvasElement: HTMLCanvasElement | null = null;
+  private parentElement: HTMLElement | null = null;
+  private containerDiv: HTMLDivElement | null = null;
   
   // Observable for renderer events
-  public events$ = new Subject<RenderEvent>()
-  
-  constructor(config: Partial<RendererConfig> = {}) {
-    // Default configuration
-    const defaultConfig: RendererConfig = {
-      width: 800,
-      height: 600,
-      backgroundColor: 0x242424,
-      antialias: true,
+  public events$ = new Subject<RendererEvent>();
+
+  constructor(options: RendererOptions) {
+    console.log('Creating PixiRenderer with options:', options);
+    
+    // Create PIXI application with explicit forceCanvas option
+    this.app = new PIXI.Application({
+      width: options.width,
+      height: options.height,
+      backgroundColor: options.backgroundColor || 0x000000,
+      antialias: options.antialias || false,
+      transparent: options.transparent || false,
+      forceCanvas: false, // Try WebGL first
+      powerPreference: 'high-performance',
       resolution: window.devicePixelRatio || 1
-    }
-    
-    this.config = { ...defaultConfig, ...config }
-    
-    // Create PIXI Application with proper options
-    try {
-      this.app = new PIXI.Application({
-        width: this.config.width,
-        height: this.config.height,
-        backgroundColor: this.config.backgroundColor,
-        antialias: this.config.antialias,
-        resolution: this.config.resolution,
-        autoDensity: true,
-        // Force Canvas renderer instead of WebGL to avoid issues
-        forceCanvas: true
-      })
-      
-      // Wait for the application to be ready before adding to DOM
-      // This ensures the canvas is created
-      setTimeout(() => {
-        this.initializeRenderer()
-      }, 100)
-    } catch (error) {
-      console.error('Failed to create PIXI Application:', error)
-    }
-  }
-  
-  /**
-   * Initialize the renderer after creation
-   */
-  private initializeRenderer(): void {
-    if (!this.app) {
-      console.error('PIXI Application failed to initialize')
-      return
-    }
-    
-    try {
-      // Add canvas to parent element or body
-      if (this.config.parentElement && this.app.view) {
-        this.config.parentElement.appendChild(this.app.view as HTMLCanvasElement)
-      } else if (this.app.view) {
-        document.body.appendChild(this.app.view as HTMLCanvasElement)
-      }
-      
-      // Initialize textures
-      this.initTextures()
-      
-      // Setup interaction
-      this.setupInteraction()
-      
-      this.isInitialized = true
-    } catch (error) {
-      console.error('Failed to initialize renderer:', error)
-    }
-  }
-  
-  /**
-   * Initialize textures for different monster types
-   */
-  private initTextures(): void {
-    if (!this.app || !this.app.renderer) {
-      console.error('Cannot initialize textures: PIXI renderer not available')
-      return
-    }
-    
-    try {
-      // Create circle textures for each monster type
-      for (let i = 0; i < this.monsterColors.length; i++) {
-        const graphics = new PIXI.Graphics()
-        graphics.beginFill(this.monsterColors[i])
-        graphics.drawCircle(0, 0, 50) // Base size, will be scaled
-        graphics.endFill()
+    });
+
+    // Store reference to canvas and parent
+    this.canvasElement = this.app.view as HTMLCanvasElement;
+    this.parentElement = options.parentElement || null;
+
+    // Add to parent element if provided
+    if (options.parentElement && this.canvasElement) {
+      try {
+        // Check if we're in isolation mode
+        const isIsolationMode = document.documentElement.getAttribute('data-app-mode') === 'super-isolated';
         
-        const texture = this.app.renderer.generateTexture(graphics)
-        this.textures.set(`monster_${i}`, texture)
-      }
-    } catch (error) {
-      console.error('Failed to generate textures:', error)
-    }
-  }
-  
-  /**
-   * Setup interaction events
-   */
-  private setupInteraction(): void {
-    if (!this.app || !this.app.stage) {
-      console.error('Cannot setup interaction: PIXI stage not available')
-      return
-    }
-    
-    try {
-      // Make stage interactive
-      this.app.stage.eventMode = 'static'
-      this.app.stage.hitArea = new PIXI.Rectangle(0, 0, this.app.screen.width, this.app.screen.height)
-      
-      // Handle click/tap events
-      this.app.stage.on('pointerdown', (event) => {
-        const position = event.global
+        // Always use container approach for better stability
+        // Create a container div that we'll never remove
+        this.containerDiv = document.createElement('div');
+        this.containerDiv.className = 'pixi-container';
+        this.containerDiv.style.width = `${options.width}px`;
+        this.containerDiv.style.height = `${options.height}px`;
+        this.containerDiv.style.position = 'relative';
+        options.parentElement.appendChild(this.containerDiv);
         
-        this.events$.next({
-          type: 'STAGE_CLICK',
-          data: {
-            x: position.x,
-            y: position.y,
-            originalEvent: event
-          }
-        })
-      })
-    } catch (error) {
-      console.error('Failed to setup interaction:', error)
+        // Add canvas to the container
+        this.containerDiv.appendChild(this.canvasElement);
+        
+        console.log('Canvas added to container div');
+      } catch (error) {
+        console.error('Error adding canvas to parent:', error);
+      }
     }
-  }
-  
-  /**
-   * Connect to game world
-   */
-  public connectToWorld(world: GameWorld): void {
-    this.world = world
+
+    // Create monster sprites
+    this.monsterSprites = new MonsterSprites(this.app);
+
+    // Create effects manager
+    this.effectsManager = new EffectsManager(this.app);
+
+    // Create UI manager
+    this.uiManager = new UIManager(this.app);
     
-    // Ensure the renderer is initialized before starting the render loop
-    const checkAndStartRender = () => {
-      if (this.isInitialized && this.app) {
-        // Start render loop - use add instead of addOnce to keep rendering
-        if (this.app.ticker) {
-          this.app.ticker.add(this.render)
-        } else {
-          console.warn('PIXI ticker is not available. Using requestAnimationFrame fallback.')
-          // Create a fallback render loop using requestAnimationFrame if ticker is not available
-          const renderLoop = () => {
-            this.render()
-            requestAnimationFrame(renderLoop)
-          }
-          requestAnimationFrame(renderLoop)
+    // Set up event listeners for canvas
+    this.setupEventListeners();
+    
+    console.log('PixiRenderer created successfully');
+  }
+
+  /**
+   * Set up event listeners for canvas interaction
+   */
+  private setupEventListeners(): void {
+    if (!this.canvasElement) return;
+    
+    // Make canvas interactive
+    this.app.stage.eventMode = 'static';
+    this.app.stage.hitArea = new PIXI.Rectangle(0, 0, this.app.screen.width, this.app.screen.height);
+    
+    // Add click event listener to stage
+    this.app.stage.on('pointerdown', (event) => {
+      // Emit stage click event
+      this.events$.next({
+        type: 'STAGE_CLICK',
+        data: {
+          x: event.global.x,
+          y: event.global.y,
+          originalEvent: event
         }
-      } else {
-        // If not initialized yet, check again in 100ms
-        setTimeout(checkAndStartRender, 100)
-      }
-    }
+      });
+    });
     
-    checkAndStartRender()
+    console.log('Event listeners set up for canvas');
   }
-  
+
   /**
-   * Disconnect from game world
+   * Get the PIXI application instance
    */
-  public disconnect(): void {
-    if (this.app && this.app.ticker) {
-      this.app.ticker.remove(this.render)
-    }
-    this.world = null
+  public getApp(): PIXI.Application {
+    return this.app;
   }
-  
+
   /**
-   * Render function (called each frame)
+   * Connect renderer to game world
    */
-  private render = (): void => {
-    if (!this.world || !this.app) return
+  public connectToWorld(world: any): void {
+    console.log('Connecting renderer to world');
     
-    // Get all monsters
-    const monsters = monsterQuery(this.world)
-    
-    // Track existing entities to detect removed ones
-    const existingEntities = new Set<number>()
-    
-    // Update or create sprites for each monster
-    for (let i = 0; i < monsters.length; i++) {
-      const entity = monsters[i]
-      existingEntities.add(entity)
-      
-      // Get entity data
-      const x = Position.x[entity]
-      const y = Position.y[entity]
-      const type = Monster.type[entity]
-      const level = Monster.level[entity]
-      const radius = Collider.radius[entity]
-      const health = Health.current[entity]
-      const maxHealth = Health.max[entity]
-      const isPlayerControlled = this.world.playerEntities.includes(entity)
-      
-      // Get or create sprite container
-      let container = this.entitySprites.get(entity)
-      
-      if (!container) {
-        // Create new container for this entity
-        container = new PIXI.Container()
-        container.eventMode = 'static'
-        container.cursor = 'pointer'
-        
-        // Add to stage and map
-        this.app.stage.addChild(container)
-        this.entitySprites.set(entity, container)
-        
-        // Add click handler
-        container.on('pointerdown', (event) => {
-          event.stopPropagation()
-          this.events$.next({
-            type: 'ENTITY_CLICK',
-            data: {
-              entity,
-              x: event.global.x,
-              y: event.global.y,
-              originalEvent: event
-            }
-          })
-        })
-        
-        // Create sprite
-        const texture = this.textures.get(`monster_${type % this.monsterColors.length}`)
-        if (!texture) {
-          console.error(`Texture not found for monster type ${type}`)
-          continue
-        }
-        
-        const sprite = new PIXI.Sprite(texture)
-        sprite.anchor.set(0.5)
-        container.addChild(sprite)
-        
-        // Create border for player monsters
-        const border = new PIXI.Graphics()
-        border.name = 'border'
-        container.addChild(border)
-        
-        // Create level text
-        const levelText = new PIXI.Text(level.toString(), {
-          fontFamily: 'Arial',
-          fontSize: 16,
-          fill: 0xFFFFFF,
-          align: 'center'
-        })
-        levelText.name = 'levelText'
-        levelText.anchor.set(0.5)
-        container.addChild(levelText)
-        
-        // Create health bar container
-        const healthBar = new PIXI.Container()
-        healthBar.name = 'healthBar'
-        container.addChild(healthBar)
-        
-        // Health bar background
-        const healthBg = new PIXI.Graphics()
-        healthBg.name = 'healthBg'
-        healthBar.addChild(healthBg)
-        
-        // Health bar fill
-        const healthFill = new PIXI.Graphics()
-        healthFill.name = 'healthFill'
-        healthBar.addChild(healthFill)
-      }
-      
-      // Update container position
-      container.position.set(x, y)
-      
-      // Update sprite
-      const sprite = container.getChildAt(0) as PIXI.Sprite
-      const texture = this.textures.get(`monster_${type % this.monsterColors.length}`)
-      if (texture) {
-        sprite.texture = texture
-      }
-      sprite.scale.set(radius / 50) // Scale based on radius (texture is 50px radius)
-      
-      // Update border for player monsters
-      const border = container.getChildByName('border') as PIXI.Graphics
-      border.clear()
-      if (isPlayerControlled) {
-        border.lineStyle(2, 0xFFFFFF)
-        border.drawCircle(0, 0, radius)
-      }
-      
-      // Update level text
-      const levelText = container.getChildByName('levelText') as PIXI.Text
-      levelText.text = level.toString()
-      
-      // Update health bar
-      const healthBar = container.getChildByName('healthBar') as PIXI.Container
-      const healthBg = healthBar.getChildByName('healthBg') as PIXI.Graphics
-      const healthFill = healthBar.getChildByName('healthFill') as PIXI.Graphics
-      
-      const healthWidth = radius * 2
-      const healthHeight = 6
-      const healthX = -radius
-      const healthY = -radius - 10
-      
-      healthBar.position.set(0, 0)
-      
-      // Health bar background
-      healthBg.clear()
-      healthBg.beginFill(0x333333)
-      healthBg.drawRect(healthX, healthY, healthWidth, healthHeight)
-      healthBg.endFill()
-      
-      // Health bar fill
-      healthFill.clear()
-      const healthFillWidth = (health / maxHealth) * healthWidth
-      let healthColor = 0x33FF57 // Green
-      if (health <= maxHealth * 0.2) {
-        healthColor = 0xFF5733 // Red
-      } else if (health <= maxHealth * 0.5) {
-        healthColor = 0xF3FF33 // Yellow
-      }
-      
-      healthFill.beginFill(healthColor)
-      healthFill.drawRect(healthX, healthY, healthFillWidth, healthHeight)
-      healthFill.endFill()
-    }
-    
-    // Remove sprites for entities that no longer exist
-    this.entitySprites.forEach((sprite, entity) => {
-      if (!existingEntities.has(entity)) {
-        if (this.app && this.app.stage) {
-          this.app.stage.removeChild(sprite)
-          sprite.destroy({ children: true })
-          this.entitySprites.delete(entity)
-        }
-      }
-    })
+    // Add any world-specific setup here
+    // This is a placeholder for future implementation
   }
-  
+
   /**
-   * Get canvas element
-   */
-  public getView(): HTMLCanvasElement | null {
-    // Safely return the view, or null if not available
-    if (!this.app) return null
-    
-    try {
-      return this.app.view as HTMLCanvasElement || null
-    } catch (error) {
-      console.error('Failed to get canvas view:', error)
-      return null
-    }
-  }
-  
-  /**
-   * Resize renderer
+   * Resize the renderer
    */
   public resize(width: number, height: number): void {
-    if (!this.app || !this.app.renderer) {
-      console.error('Cannot resize: PIXI renderer not available')
-      return
+    console.log(`Resizing renderer to ${width}x${height}`);
+    
+    if (this.isDestroyed) return;
+    
+    // Resize PIXI application
+    this.app.renderer.resize(width, height);
+    
+    // Update container size if it exists
+    if (this.containerDiv) {
+      this.containerDiv.style.width = `${width}px`;
+      this.containerDiv.style.height = `${height}px`;
     }
     
-    try {
-      this.app.renderer.resize(width, height)
-      
-      // Update stage hit area
-      if (this.app.stage) {
-        this.app.stage.hitArea = new PIXI.Rectangle(0, 0, width, height)
-      }
-    } catch (error) {
-      console.error('Failed to resize renderer:', error)
+    // Update stage hit area
+    this.app.stage.hitArea = new PIXI.Rectangle(0, 0, width, height);
+  }
+
+  /**
+   * Handle a game event
+   */
+  public handleGameEvent(event: GameEvent): void {
+    if (this.isDestroyed) return;
+    
+    switch (event.type) {
+      case 'MONSTER_ADDED':
+        this.addMonsterSprite(event.data);
+        break;
+      case 'MONSTER_REMOVED':
+        this.removeMonsterSprite(event.data.entityId);
+        break;
+      case 'MONSTER_MOVED':
+        this.updateMonsterPosition(event.data.entityId, event.data.x, event.data.y);
+        break;
+      case 'MONSTER_DAMAGED':
+        this.showDamageEffect(event.data.entityId, event.data.amount);
+        break;
+      case 'MONSTER_HEALED':
+        this.showHealEffect(event.data.entityId, event.data.amount);
+        break;
+      case 'MONSTER_MERGED':
+        this.showMergeEffect(event.data.x, event.data.y, event.data.type);
+        break;
+      case 'MONSTER_DIED':
+        this.showDeathEffect(event.data.entityId, event.data.x, event.data.y);
+        break;
     }
   }
-  
+
   /**
-   * Destroy renderer
+   * Add a monster sprite
    */
-  public destroy(): void {
-    if (!this.app) return
+  private addMonsterSprite(data: any): void {
+    if (this.isDestroyed) return;
     
+    const sprite = this.monsterSprites.createMonsterSprite(data.type, data.level);
+    sprite.position.set(data.x, data.y);
+    this.app.stage.addChild(sprite);
+    this.entitySprites.set(data.entityId, sprite);
+    
+    // Make sprite interactive
+    sprite.eventMode = 'static';
+    sprite.cursor = 'pointer';
+    
+    // Add click event listener
+    sprite.on('pointerdown', (event) => {
+      // Stop event propagation
+      event.stopPropagation();
+      
+      // Emit entity click event
+      this.events$.next({
+        type: 'ENTITY_CLICK',
+        data: {
+          entity: data.entityId,
+          x: data.x,
+          y: data.y,
+          originalEvent: event
+        }
+      });
+    });
+  }
+
+  /**
+   * Remove a monster sprite
+   */
+  private removeMonsterSprite(entityId: number): void {
+    if (this.isDestroyed) return;
+    
+    const sprite = this.entitySprites.get(entityId);
+    if (sprite) {
+      try {
+        this.app.stage.removeChild(sprite);
+      } catch (error) {
+        console.error(`Error removing sprite for entity ${entityId}:`, error);
+      }
+      this.entitySprites.delete(entityId);
+    }
+  }
+
+  /**
+   * Update a monster's position
+   */
+  private updateMonsterPosition(entityId: number, x: number, y: number): void {
+    if (this.isDestroyed) return;
+    
+    const sprite = this.entitySprites.get(entityId);
+    if (sprite) {
+      sprite.position.set(x, y);
+    }
+  }
+
+  /**
+   * Show damage effect
+   */
+  private showDamageEffect(entityId: number, amount: number): void {
+    if (this.isDestroyed) return;
+    
+    const sprite = this.entitySprites.get(entityId);
+    if (sprite) {
+      this.effectsManager.showDamageNumber(sprite.position.x, sprite.position.y, amount);
+    }
+  }
+
+  /**
+   * Show heal effect
+   */
+  private showHealEffect(entityId: number, amount: number): void {
+    if (this.isDestroyed) return;
+    
+    const sprite = this.entitySprites.get(entityId);
+    if (sprite) {
+      this.effectsManager.showHealNumber(sprite.position.x, sprite.position.y, amount);
+    }
+  }
+
+  /**
+   * Show merge effect
+   */
+  private showMergeEffect(x: number, y: number, type: number): void {
+    if (this.isDestroyed) return;
+    
+    this.effectsManager.showMergeEffect(x, y, type);
+  }
+
+  /**
+   * Show death effect
+   */
+  private showDeathEffect(entityId: number, x: number, y: number): void {
+    if (this.isDestroyed) return;
+    
+    this.effectsManager.showExplosion(x, y);
+  }
+
+  /**
+   * Destroy the renderer and clean up resources
+   */
+  public async destroy(): Promise<void> {
+    console.log('Destroying PixiRenderer');
+    
+    if (this.isDestroyed) {
+      console.log('Renderer already destroyed, skipping');
+      return;
+    }
+    
+    this.isDestroyed = true;
+    
+    // Clear all entity sprites
+    this.entitySprites.clear();
+    
+    // Destroy PIXI application
     try {
-      this.app.destroy(true, { children: true, texture: true, baseTexture: true })
-      this.app = null
+      // Hide canvas first to prevent flickering
+      if (this.canvasElement) {
+        this.canvasElement.style.display = 'none';
+      }
+      
+      // Complete and close event subject
+      this.events$.complete();
+      
+      // Destroy the application with all resources
+      this.app.destroy(true, { children: true, texture: true, baseTexture: true });
+      
+      // If we have a container div, hide it instead of removing
+      if (this.containerDiv) {
+        this.containerDiv.style.display = 'none';
+      }
+      
+      // Clear references
+      this.canvasElement = null;
+      this.parentElement = null;
+      
+      console.log('PixiRenderer destroyed successfully');
     } catch (error) {
-      console.error('Failed to destroy renderer:', error)
+      console.error('Error destroying PIXI application:', error);
     }
   }
 }

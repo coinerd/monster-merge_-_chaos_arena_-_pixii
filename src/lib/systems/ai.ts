@@ -1,157 +1,104 @@
 import { System } from '../types'
-import { aiQuery, aiAttackQuery } from '../queries'
-import { AI, Position, Velocity, Attack } from '../components'
+import { aiQuery } from '../queries'
+import { Position, Velocity, AI, Monster } from '../components'
 
-// AI states
-const AI_STATE = {
-  IDLE: 0,
-  CHASE: 1,
-  ATTACK: 2,
-  FLEE: 3
-}
-
-export const aiSystem: System = (world) => {
+export const aiSystem = (): System => (world: any, delta: number) => {
   const entities = aiQuery(world)
-  const delta = world.delta
   
+  // Process AI entities
   for (let i = 0; i < entities.length; i++) {
     const entity = entities[i]
     
-    // Decrease decision timer
+    // Update decision timer
     AI.decisionTimer[entity] -= delta
     
     // Make new decision if timer expired
     if (AI.decisionTimer[entity] <= 0) {
-      // Reset timer with some randomness
+      // Reset timer (random between 1-3 seconds)
       AI.decisionTimer[entity] = 1 + Math.random() * 2
       
-      // Find nearest target (player or player monster)
-      let nearestTarget = null
-      let shortestDistance = Infinity
+      // Find closest player entity
+      let closestDistance = Infinity
+      let closestEntity = -1
       
-      // In a real implementation, we would query for player entities
-      // For now, we'll use a placeholder for the player position
-      const playerEntities = world.playerEntities || []
-      
-      for (let j = 0; j < playerEntities.length; j++) {
-        const target = playerEntities[j]
-        const targetX = Position.x[target]
-        const targetY = Position.y[target]
-        const entityX = Position.x[entity]
-        const entityY = Position.y[entity]
+      for (let j = 0; j < world.playerEntities.length; j++) {
+        const playerEntity = world.playerEntities[j]
         
-        const dx = targetX - entityX
-        const dy = targetY - entityY
+        // Calculate distance
+        const dx = Position.x[playerEntity] - Position.x[entity]
+        const dy = Position.y[playerEntity] - Position.y[entity]
         const distance = Math.sqrt(dx * dx + dy * dy)
         
-        if (distance < shortestDistance) {
-          shortestDistance = distance
-          nearestTarget = target
+        if (distance < closestDistance) {
+          closestDistance = distance
+          closestEntity = playerEntity
         }
       }
       
-      // Update AI state based on distance to target
-      if (nearestTarget !== null) {
-        AI.targetEntity[entity] = nearestTarget
-        
-        if (shortestDistance < Attack.range[entity]) {
-          // Target is in attack range
-          AI.state[entity] = AI_STATE.ATTACK
-        } else if (shortestDistance < AI.detectionRange[entity]) {
-          // Target is in detection range
-          AI.state[entity] = AI_STATE.CHASE
-        } else {
-          // Target is too far
-          AI.state[entity] = AI_STATE.IDLE
-        }
+      // Set target entity
+      AI.targetEntity[entity] = closestEntity
+      
+      // Determine AI state based on distance
+      if (closestDistance < 50) {
+        // Too close, flee
+        AI.state[entity] = 3 // FLEE
+      } else if (closestDistance < 200) {
+        // Within attack range
+        AI.state[entity] = 2 // ATTACK
+      } else if (closestDistance < AI.detectionRange[entity]) {
+        // Within detection range, chase
+        AI.state[entity] = 1 // CHASE
       } else {
-        // No target found
-        AI.state[entity] = AI_STATE.IDLE
+        // Out of range, idle
+        AI.state[entity] = 0 // IDLE
       }
     }
     
     // Act based on current state
     switch (AI.state[entity]) {
-      case AI_STATE.IDLE:
-        // Random movement or stay still
-        if (Math.random() < 0.1) {
-          Velocity.x[entity] = (Math.random() * 2 - 1) * 20
-          Velocity.y[entity] = (Math.random() * 2 - 1) * 20
-        } else {
-          Velocity.x[entity] *= 0.95 // Slow down gradually
-          Velocity.y[entity] *= 0.95
+      case 0: // IDLE
+        // Random wandering
+        if (Math.random() < 0.05) {
+          Velocity.x[entity] = (Math.random() - 0.5) * 50
+          Velocity.y[entity] = (Math.random() - 0.5) * 50
         }
         break
         
-      case AI_STATE.CHASE:
-        // Move towards target
-        const targetEntity = AI.targetEntity[entity]
-        if (targetEntity !== undefined && Position.x[targetEntity] !== undefined) {
+      case 1: // CHASE
+        if (AI.targetEntity[entity] !== -1) {
+          // Move towards target
+          const targetEntity = AI.targetEntity[entity]
           const dx = Position.x[targetEntity] - Position.x[entity]
           const dy = Position.y[targetEntity] - Position.y[entity]
           const distance = Math.sqrt(dx * dx + dy * dy)
           
           if (distance > 0) {
-            // Normalize and set velocity
-            Velocity.x[entity] = (dx / distance) * 50 // Speed factor
-            Velocity.y[entity] = (dy / distance) * 50
+            Velocity.x[entity] = dx / distance * 75
+            Velocity.y[entity] = dy / distance * 75
           }
         }
         break
         
-      case AI_STATE.ATTACK:
+      case 2: // ATTACK
         // Stop moving when attacking
         Velocity.x[entity] = 0
         Velocity.y[entity] = 0
         break
         
-      case AI_STATE.FLEE:
-        // Move away from target
-        const fleeTarget = AI.targetEntity[entity]
-        if (fleeTarget !== undefined && Position.x[fleeTarget] !== undefined) {
-          const dx = Position.x[entity] - Position.x[fleeTarget]
-          const dy = Position.y[entity] - Position.y[fleeTarget]
+      case 3: // FLEE
+        if (AI.targetEntity[entity] !== -1) {
+          // Move away from target
+          const targetEntity = AI.targetEntity[entity]
+          const dx = Position.x[targetEntity] - Position.x[entity]
+          const dy = Position.y[targetEntity] - Position.y[entity]
           const distance = Math.sqrt(dx * dx + dy * dy)
           
           if (distance > 0) {
-            // Normalize and set velocity (away from target)
-            Velocity.x[entity] = (dx / distance) * 70 // Faster when fleeing
-            Velocity.y[entity] = (dy / distance) * 70
+            Velocity.x[entity] = -dx / distance * 100
+            Velocity.y[entity] = -dy / distance * 100
           }
         }
         break
-    }
-  }
-  
-  return world
-}
-
-export const aiAttackSystem: System = (world) => {
-  const entities = aiAttackQuery(world)
-  
-  for (let i = 0; i < entities.length; i++) {
-    const entity = entities[i]
-    
-    // Only process entities in attack state
-    if (AI.state[entity] !== AI_STATE.ATTACK) continue
-    
-    // Attack logic is handled by the attack system
-    // This system just ensures the AI is targeting correctly
-    const targetEntity = AI.targetEntity[entity]
-    
-    if (targetEntity !== undefined && Position.x[targetEntity] !== undefined) {
-      // Check if target is still in range
-      const dx = Position.x[targetEntity] - Position.x[entity]
-      const dy = Position.y[targetEntity] - Position.y[entity]
-      const distance = Math.sqrt(dx * dx + dy * dy)
-      
-      if (distance > Attack.range[entity]) {
-        // Target moved out of range, switch to chase
-        AI.state[entity] = AI_STATE.CHASE
-      }
-    } else {
-      // Target no longer exists, go back to idle
-      AI.state[entity] = AI_STATE.IDLE
     }
   }
   

@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en" data-app-mode="isolated">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Monster Merge: Chaos Arena</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 20px;
+        background-color: #242424;
+        color: #fff;
+      }
+      
+      .demo-selector {
+        margin-bottom: 20px;
+        text-align: center;
+      }
+      
+      .demo-button {
+        padding: 10px 20px;
+        margin: 0 10px;
+        background-color: #4CAF50;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+      }
+      
+      .demo-button:hover {
+        background-color: #45a049;
+      }
+      
+      h1 {
+        text-align: center;
+        margin-bottom: 30px;
+      }
+      
+      #app {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 2rem;
+      }
+      
+      .extension-warning {
+        background-color: #ff9800;
+        color: white;
+        padding: 10px;
+        margin-bottom: 20px;
+        border-radius: 4px;
+        text-align: center;
+      }
+      
+      .extension-warning button {
+        margin-left: 10px;
+        padding: 5px 10px;
+        background-color: white;
+        color: #ff9800;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+    </style>
+    <script>
+      // Add a global flag to detect extension errors
+      window.__EXTENSION_ERROR_DETECTED = false;
+      
+      // Override console.error to detect extension errors
+      const originalConsoleError = console.error;
+      console.error = function(...args) {
+        // Check if this is the specific error we're looking for
+        if (args.length > 0 && typeof args[0] === 'string' && 
+            args[0].includes('Failed to execute \'removeChild\' on \'Node\'')) {
+          window.__EXTENSION_ERROR_DETECTED = true;
+          
+          // Show warning if not already shown
+          if (!document.querySelector('.extension-warning')) {
+            setTimeout(() => {
+              const warning = document.createElement('div');
+              warning.className = 'extension-warning';
+              warning.innerHTML = `
+                <strong>Warning:</strong> A Chrome extension is causing errors. 
+                Consider disabling extensions or <button id="isolation-mode">Enable Isolation Mode</button>
+              `;
+              document.body.insertBefore(warning, document.body.firstChild);
+              
+              // Add event listener for isolation mode button
+              document.getElementById('isolation-mode').addEventListener('click', () => {
+                // Set isolation mode
+                document.documentElement.setAttribute('data-app-mode', 'super-isolated');
+                localStorage.setItem('app-isolation-mode', 'enabled');
+                
+                // Reload page
+                location.reload();
+              });
+            }, 500);
+          }
+        }
+        
+        // Call original console.error
+        originalConsoleError.apply(console, args);
+      };
+      
+      // Check if isolation mode is enabled
+      if (localStorage.getItem('app-isolation-mode') === 'enabled') {
+        document.documentElement.setAttribute('data-app-mode', 'super-isolated');
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Monster Merge: Chaos Arena</h1>
+    
+    <div class="demo-selector">
+      <button id="demo-basic" class="demo-button">Basic Demo</button>
+      <button id="demo-pixi" class="demo-button">PIXI Demo</button>
+      <button id="demo-state" class="demo-button">State Demo</button>
+      <button id="demo-grid" class="demo-button">Grid Demo</button>
+    </div>
+    
+    <div id="app"></div>
+    
+    <script type="module">
+      // Debug flag
+      const DEBUG = true;
+      
+      // Debug logging function
+      function debug(...args) {
+        if (DEBUG) {
+          console.log('[LOADER]', ...args);
+        }
+      }
+      
+      // Check if we're in isolation mode
+      const isIsolationMode = document.documentElement.getAttribute('data-app-mode') === 'super-isolated';
+      if (isIsolationMode) {
+        debug('Running in isolation mode to avoid extension conflicts');
+      }
+      
+      // Get buttons
+      const basicDemoBtn = document.getElementById('demo-basic');
+      const pixiDemoBtn = document.getElementById('demo-pixi');
+      const stateDemoBtn = document.getElementById('demo-state');
+      const gridDemoBtn = document.getElementById('demo-grid');
+      
+      // Track current demo module
+      let currentDemoModule = null;
+      let currentDemoName = null;
+      
+      // Function to load a demo
+      async function loadDemo(scriptPath, demoName) {
+        debug(`Loading demo: ${demoName} from ${scriptPath}`);
+        
+        try {
+          // First, clean up previous demo if exists
+          if (currentDemoModule && currentDemoModule.cleanup) {
+            debug(`Cleaning up previous demo: ${currentDemoName}`);
+            try {
+              await currentDemoModule.cleanup();
+            } catch (error) {
+              console.error(`Error cleaning up previous demo ${currentDemoName}:`, error);
+            }
+          }
+          
+          // Clear app container
+          const appContainer = document.getElementById('app');
+          if (appContainer) {
+            debug('Clearing app container');
+            appContainer.innerHTML = '';
+          }
+          
+          // Reset current module
+          currentDemoModule = null;
+          
+          // Use dynamic import to load the module
+          debug(`Dynamically importing module: ${scriptPath}`);
+          const module = await import(scriptPath);
+          
+          // Store reference to the module
+          currentDemoModule = module;
+          currentDemoName = demoName;
+          
+          debug(`Successfully loaded demo: ${demoName}`);
+        } catch (error) {
+          console.error(`Error loading demo ${demoName}:`, error);
+          
+          // Show error in app container
+          const appContainer = document.getElementById('app');
+          if (appContainer) {
+            appContainer.innerHTML = `
+              <div style="color: #ff5555; padding: 20px; border: 1px solid #ff5555; border-radius: 5px;">
+                <h3>Error Loading Demo</h3>
+                <p>${error.message}</p>
+                <pre>${error.stack}</pre>
+              </div>
+            `;
+          }
+        }
+      }
+      
+      // Set up button event listeners
+      basicDemoBtn.addEventListener('click', () => loadDemo('/src/demo.ts', 'Basic Demo'));
+      pixiDemoBtn.addEventListener('click', () => loadDemo('/src/demo-pixi.ts', 'PIXI Demo'));
+      stateDemoBtn.addEventListener('click', () => loadDemo('/src/demo-state.ts', 'State Demo'));
+      gridDemoBtn.addEventListener('click', () => loadDemo('/src/demo-grid.ts', 'Grid Demo'));
+      
+      // Load default demo after a short delay to ensure DOM is ready
+      setTimeout(() => {
+        debug('Loading default demo');
+        loadDemo('/src/demo-grid.ts', 'Grid Demo');
+      }, 100);
+      
+      // Add cleanup on page unload
+      window.addEventListener('beforeunload', () => {
+        if (currentDemoModule && currentDemoModule.cleanup) {
+          debug(`Cleaning up demo ${currentDemoName} before page unload`);
+          try {
+            currentDemoModule.cleanup();
+          } catch (error) {
+            console.error(`Error during cleanup of ${currentDemoName}:`, error);
+          }
+        }
+      });
+      
+      // Add isolation mode toggle in footer
+      const footer = document.createElement('div');
+      footer.style.marginTop = '50px';
+      footer.style.textAlign = 'center';
+      footer.style.color = '#888';
+      footer.style.fontSize = '12px';
+      
+      const isolationToggle = document.createElement('button');
+      isolationToggle.textContent = isIsolationMode ? 'Disable Isolation Mode' : 'Enable Isolation Mode';
+      isolationToggle.style.padding = '5px 10px';
+      isolationToggle.style.backgroundColor = '#555';
+      isolationToggle.style.color = 'white';
+      isolationToggle.style.border = 'none';
+      isolationToggle.style.borderRadius = '4px';
+      isolationToggle.style.cursor = 'pointer';
+      isolationToggle.style.marginTop = '10px';
+      
+      isolationToggle.addEventListener('click', () => {
+        if (isIsolationMode) {
+          localStorage.removeItem('app-isolation-mode');
+        } else {
+          localStorage.setItem('app-isolation-mode', 'enabled');
+        }
+        location.reload();
+      });
+      
+      footer.appendChild(document.createTextNode('Having issues with browser extensions? '));
+      footer.appendChild(isolationToggle);
+      document.body.appendChild(footer);
+    </script>
+  </body>
+</html>

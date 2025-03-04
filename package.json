@@ -1,5 +1,5 @@
 {
-  "name": "monster-merge-chaos-arena",
+  "name": "monster-merge",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -14,7 +14,10 @@
   },
   "dependencies": {
     "bitecs": "^0.3.40",
-    "pixi.js": "^7.3.2",
-    "rxjs": "^7.8.1"
+    "mitt": "^3.0.1",
+    "pixi.js": "^7.3.1",
+    "rxjs": "^7.8.1",
+    "uuid": "^9.0.1",
+    "zustand": "^4.4.1"
   }
 }

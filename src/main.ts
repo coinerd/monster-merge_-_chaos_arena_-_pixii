@@ -1,4 +1,5 @@
 import './style.css'
-import './demo-pixi'
+import { createGame } from './lib'
 
-// Main entry point is now in demo-pixi.ts
+// Redirect to index.html which has the demo selector
+window.location.href = '/index.html'

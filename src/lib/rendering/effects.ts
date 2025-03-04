@@ -1,219 +1,327 @@
-import * as PIXI from 'pixi.js'
-
-interface ExtendedSprite extends PIXI.Sprite {
-  vx?: number;
-  vy?: number;
-}
+import * as PIXI from 'pixi.js';
 
 export class EffectsFactory {
   private app: PIXI.Application;
+  private container: PIXI.Container;
   
   constructor(app: PIXI.Application) {
     this.app = app;
+    
+    // Create container for effects
+    this.container = new PIXI.Container();
+    this.app.stage.addChild(this.container);
+    
+    console.log('EffectsFactory initialized');
+  }
+  
+  /**
+   * Create explosion effect
+   */
+  public createExplosionEffect(x: number, y: number, color: number = 0xFFFFFF): PIXI.Container {
+    const container = new PIXI.Container();
+    container.position.set(x, y);
+    
+    // Create particles
+    const particleCount = 20;
+    const particles: PIXI.Graphics[] = [];
+    
+    for (let i = 0; i < particleCount; i++) {
+      const particle = new PIXI.Graphics();
+      particle.beginFill(color);
+      particle.drawCircle(0, 0, Math.random() * 3 + 1);
+      particle.endFill();
+      
+      // Random position
+      const angle = Math.random() * Math.PI * 2;
+      const distance = Math.random() * 10;
+      particle.position.set(
+        Math.cos(angle) * distance,
+        Math.sin(angle) * distance
+      );
+      
+      // Store velocity
+      particle.data = {
+        vx: Math.cos(angle) * (Math.random() * 5 + 2),
+        vy: Math.sin(angle) * (Math.random() * 5 + 2),
+        alpha: 1,
+        rotation: Math.random() * 0.2 - 0.1
+      };
+      
+      container.addChild(particle);
+      particles.push(particle);
+    }
+    
+    // Add to stage
+    this.container.addChild(container);
+    
+    // Animate particles
+    let elapsed = 0;
+    const animate = () => {
+      elapsed += 0.01;
+      
+      let active = false;
+      
+      particles.forEach(particle => {
+        // Update position
+        particle.position.x += particle.data.vx;
+        particle.position.y += particle.data.vy;
+        
+        // Apply gravity
+        particle.data.vy += 0.1;
+        
+        // Update alpha
+        particle.alpha = 1 - elapsed;
+        
+        // Rotate
+        particle.rotation += particle.data.rotation;
+        
+        if (particle.alpha > 0) {
+          active = true;
+        }
+      });
+      
+      if (active && elapsed < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        this.container.removeChild(container);
+      }
+    };
+    
+    animate();
+    
+    return container;
   }
   
   /**
    * Create merge effect
    */
-  public createMergeEffect(x: number, y: number, color: number = 0xFFFFFF): void {
-    // Check if app and renderer are initialized
-    if (!this.app || !this.app.renderer) {
-      console.error('PIXI Application or renderer not initialized');
-      return;
-    }
+  public createMergeEffect(x: number, y: number, color: number = 0xFFFFFF): PIXI.Container {
+    const container = new PIXI.Container();
+    container.position.set(x, y);
     
-    // Create particles
-    const particles = new PIXI.ParticleContainer(100, {
-      position: true,
-      rotation: true,
-      uvs: true,
-      alpha: true
-    });
+    // Create ring effect
+    const ring = new PIXI.Graphics();
+    ring.lineStyle(3, color);
+    ring.drawCircle(0, 0, 1);
+    container.addChild(ring);
     
-    particles.position.set(x, y);
-    this.app.stage.addChild(particles);
+    // Create glow
+    const glow = new PIXI.Graphics();
+    glow.beginFill(color, 0.3);
+    glow.drawCircle(0, 0, 30);
+    glow.endFill();
+    glow.alpha = 0;
+    container.addChild(glow);
     
-    // Create particle graphics and texture
-    let particleTexture: PIXI.Texture;
+    // Add to stage
+    this.container.addChild(container);
     
-    try {
-      // Create particle graphics
-      const particleGraphics = new PIXI.Graphics();
-      particleGraphics.beginFill(color);
-      particleGraphics.drawCircle(0, 0, 5);
-      particleGraphics.endFill();
-      
-      // Generate texture safely
-      particleTexture = this.app.renderer.generateTexture(particleGraphics);
-    } catch (error) {
-      console.error('Failed to generate particle texture:', error);
-      // Create a fallback texture - 1x1 white pixel
-      const canvas = document.createElement('canvas');
-      canvas.width = 1;
-      canvas.height = 1;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(0, 0, 1, 1);
-      }
-      particleTexture = PIXI.Texture.from(canvas);
-      
-      // Clean up particles since we had an error
-      this.app.stage.removeChild(particles);
-      particles.destroy();
-      return;
-    }
-    
-    // Create particles
-    const particleCount = 20;
-    const particleSprites: ExtendedSprite[] = [];
-    
-    for (let i = 0; i < particleCount; i++) {
-      const particle = new PIXI.Sprite(particleTexture) as ExtendedSprite;
-      particle.anchor.set(0.5);
-      particle.alpha = 1;
-      particle.scale.set(0.5 + Math.random() * 0.5);
-      
-      // Random direction
-      const angle = Math.random() * Math.PI * 2;
-      const speed = 2 + Math.random() * 3;
-      
-      // Store velocity in sprite
-      particle.vx = Math.cos(angle) * speed;
-      particle.vy = Math.sin(angle) * speed;
-      
-      particles.addChild(particle);
-      particleSprites.push(particle);
-    }
-    
-    // Animate particles
+    // Animate
     let elapsed = 0;
-    const tick = (delta: number) => {
-      elapsed += delta;
+    const animate = () => {
+      elapsed += 0.05;
       
-      for (let i = 0; i < particleSprites.length; i++) {
-        const particle = particleSprites[i];
-        
-        // Move particle
-        if (particle.vx !== undefined && particle.vy !== undefined) {
-          particle.position.x += particle.vx;
-          particle.position.y += particle.vy;
-        }
-        
-        // Fade out
-        particle.alpha -= 0.01 * delta;
-        
-        // Remove if faded out
-        if (particle.alpha <= 0) {
-          particles.removeChild(particle);
-          particleSprites.splice(i, 1);
-          i--;
-        }
+      // Expand ring
+      ring.clear();
+      ring.lineStyle(3 * (1 - elapsed), color);
+      ring.drawCircle(0, 0, 50 * elapsed);
+      
+      // Fade in/out glow
+      if (elapsed < 0.5) {
+        glow.alpha = elapsed * 2;
+      } else {
+        glow.alpha = (1 - elapsed) * 2;
       }
       
-      // Remove ticker when all particles are gone
-      if (particleSprites.length === 0) {
-        this.app.ticker.remove(tick);
-        particles.destroy();
+      if (elapsed < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        this.container.removeChild(container);
       }
     };
     
-    // Safely add ticker
-    if (this.app.ticker) {
-      this.app.ticker.add(tick);
-    }
+    animate();
+    
+    return container;
   }
   
   /**
    * Create spawn effect
    */
-  public createSpawnEffect(x: number, y: number, color: number = 0xFFFFFF): void {
-    // Check if app is initialized
-    if (!this.app || !this.app.stage) {
-      console.error('PIXI Application or stage not initialized');
-      return;
+  public createSpawnEffect(x: number, y: number, color: number = 0xFFFFFF): PIXI.Container {
+    const container = new PIXI.Container();
+    container.position.set(x, y);
+    
+    // Create particles
+    const particleCount = 15;
+    const particles: PIXI.Graphics[] = [];
+    
+    for (let i = 0; i < particleCount; i++) {
+      const particle = new PIXI.Graphics();
+      particle.beginFill(color);
+      particle.drawCircle(0, 0, Math.random() * 3 + 1);
+      particle.endFill();
+      
+      // Random position
+      const angle = Math.random() * Math.PI * 2;
+      const distance = 30 + Math.random() * 20;
+      particle.position.set(
+        Math.cos(angle) * distance,
+        Math.sin(angle) * distance
+      );
+      
+      // Store velocity
+      particle.data = {
+        targetX: 0,
+        targetY: 0,
+        speed: Math.random() * 0.1 + 0.05,
+        alpha: 1
+      };
+      
+      container.addChild(particle);
+      particles.push(particle);
     }
     
-    // Create circle that expands and fades
-    const circle = new PIXI.Graphics();
-    circle.beginFill(color);
-    circle.drawCircle(0, 0, 10);
-    circle.endFill();
-    circle.position.set(x, y);
-    circle.alpha = 0.8;
+    // Add to stage
+    this.container.addChild(container);
     
-    this.app.stage.addChild(circle);
-    
-    // Animate circle
+    // Animate particles
     let elapsed = 0;
-    const tick = (delta: number) => {
-      elapsed += delta;
+    const animate = () => {
+      elapsed += 0.01;
       
-      // Expand circle
-      circle.scale.set(circle.scale.x + 0.05 * delta);
+      let active = false;
       
-      // Fade out
-      circle.alpha -= 0.02 * delta;
+      particles.forEach(particle => {
+        // Move towards center
+        const dx = particle.data.targetX - particle.position.x;
+        const dy = particle.data.targetY - particle.position.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance > 0.5) {
+          particle.position.x += dx * particle.data.speed;
+          particle.position.y += dy * particle.data.speed;
+          active = true;
+        }
+        
+        // Update alpha
+        particle.alpha = 1 - elapsed;
+        
+        if (particle.alpha > 0) {
+          active = true;
+        }
+      });
       
-      // Remove when faded out
-      if (circle.alpha <= 0) {
-        this.app.ticker.remove(tick);
-        this.app.stage.removeChild(circle);
-        circle.destroy();
+      if (active && elapsed < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        this.container.removeChild(container);
       }
     };
     
-    // Safely add ticker
-    if (this.app.ticker) {
-      this.app.ticker.add(tick);
-    }
+    animate();
+    
+    return container;
   }
   
   /**
    * Create damage effect
    */
-  public createDamageEffect(x: number, y: number, damage: number): void {
-    // Check if app is initialized
-    if (!this.app || !this.app.stage) {
-      console.error('PIXI Application or stage not initialized');
-      return;
-    }
+  public createDamageEffect(x: number, y: number, damage: number): PIXI.Container {
+    const container = new PIXI.Container();
+    container.position.set(x, y);
     
-    // Create text that floats up and fades
-    const text = new PIXI.Text(damage.toString(), {
+    // Create damage text
+    const damageText = new PIXI.Text(`-${damage}`, {
       fontFamily: 'Arial',
-      fontSize: 20,
-      fontWeight: 'bold',
-      fill: 0xFF0000
+      fontSize: 16,
+      fill: 0xFF0000,
+      align: 'center',
+      fontWeight: 'bold'
     });
+    damageText.anchor.set(0.5);
+    container.addChild(damageText);
     
-    text.anchor.set(0.5);
-    text.position.set(x, y);
+    // Add to stage
+    this.container.addChild(container);
     
-    this.app.stage.addChild(text);
-    
-    // Animate text
+    // Animate
     let elapsed = 0;
-    const tick = (delta: number) => {
-      elapsed += delta;
+    const animate = () => {
+      elapsed += 0.05;
       
-      // Float up
-      text.position.y -= 1 * delta;
+      // Move up
+      container.position.y -= 1;
+      
+      // Scale up slightly then down
+      if (elapsed < 0.2) {
+        damageText.scale.set(1 + elapsed);
+      } else {
+        damageText.scale.set(1.2 - (elapsed - 0.2));
+      }
       
       // Fade out
-      text.alpha -= 0.02 * delta;
+      container.alpha = 1 - elapsed;
       
-      // Remove when faded out
-      if (text.alpha <= 0) {
-        this.app.ticker.remove(tick);
-        this.app.stage.removeChild(text);
-        text.destroy();
+      if (elapsed < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        this.container.removeChild(container);
       }
     };
     
-    // Safely add ticker
-    if (this.app.ticker) {
-      this.app.ticker.add(tick);
-    }
+    animate();
+    
+    console.log(`Created damage effect at (${x}, ${y}) with damage: ${damage}`);
+    return container;
   }
+}
+
+// Helper functions to create effects without needing the factory
+export function createExplosionEffect(x: number, y: number): PIXI.Container {
+  const container = new PIXI.Container();
+  container.position.set(x, y);
+  
+  // Create particles
+  const particleCount = 20;
+  
+  for (let i = 0; i < particleCount; i++) {
+    const particle = new PIXI.Graphics();
+    particle.beginFill(0xFFFFFF);
+    particle.drawCircle(0, 0, Math.random() * 3 + 1);
+    particle.endFill();
+    
+    // Random position
+    const angle = Math.random() * Math.PI * 2;
+    const distance = Math.random() * 10;
+    particle.position.set(
+      Math.cos(angle) * distance,
+      Math.sin(angle) * distance
+    );
+    
+    // Store velocity
+    particle.data = {
+      vx: Math.cos(angle) * (Math.random() * 5 + 2),
+      vy: Math.sin(angle) * (Math.random() * 5 + 2),
+      alpha: 1,
+      rotation: Math.random() * 0.2 - 0.1
+    };
+    
+    container.addChild(particle);
+  }
+  
+  return container;
+}
+
+export function createMergeEffect(x: number, y: number): PIXI.Container {
+  const container = new PIXI.Container();
+  container.position.set(x, y);
+  
+  // Create ring effect
+  const ring = new PIXI.Graphics();
+  ring.lineStyle(3, 0xFFFFFF);
+  ring.drawCircle(0, 0, 30);
+  container.addChild(ring);
+  
+  return container;
 }

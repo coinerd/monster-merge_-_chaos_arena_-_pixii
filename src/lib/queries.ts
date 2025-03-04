@@ -1,56 +1,72 @@
-import { defineQuery } from 'bitecs'
-import {
-  Position,
-  Velocity,
-  Collider,
-  Monster,
-  Health,
+import { defineQuery, hasComponent } from 'bitecs'
+import { 
+  Position, 
+  Velocity, 
+  Health, 
+  Attack, 
+  Monster, 
+  Mergeable, 
+  Collider, 
+  Overlap, 
+  PlayerControlled, 
+  Enemy, 
   AI,
-  PlayerControlled,
-  Attack,
-  Knockback,
-  Overlap,
-  Mergeable
+  Knockback
 } from './components'
 
-// Query for all monsters
-export const monsterQuery = defineQuery([Position, Monster])
-
-// Query for monsters with velocity
-export const movementQuery = defineQuery([Position, Velocity])
-
-// Query for entities that can move (same as movementQuery)
+// Query for entities with position and velocity
 export const movableQuery = defineQuery([Position, Velocity])
 
-// Query for entities with colliders
+// Query for entities with knockback component
+export const knockbackQuery = defineQuery([Knockback])
+
+// Query for entities with position and velocity (for movement system)
+export const movingEntityQuery = defineQuery([Position, Velocity])
+
+// Query for entities with position and collider
 export const colliderQuery = defineQuery([Position, Collider])
 
 // Query for entities with overlap component
 export const overlapQuery = defineQuery([Overlap])
 
-// Query for mergeable entities that are overlapping
-export const mergeableOverlapQuery = defineQuery([Mergeable, Overlap])
+// Query for entities with attack component
+export const attackerQuery = defineQuery([Attack, Position])
 
-// Query for monsters with health
-export const healthQuery = defineQuery([Health])
+// Query for entities with health component
+export const damageableQuery = defineQuery([Health])
 
-// Query for monsters with AI
+// Query for entities with mergeable component and overlap
+export const mergeableOverlapQuery = defineQuery([Mergeable, Overlap, Monster])
+
+// Query for entities with AI component
 export const aiQuery = defineQuery([AI, Position, Velocity])
 
-// Query for monsters with AI and attack capability
-export const aiAttackQuery = defineQuery([AI, Position, Attack])
-
-// Query for player controlled monsters
+// Query for player controlled entities
 export const playerQuery = defineQuery([PlayerControlled])
 
-// Query for monsters that can attack
-export const attackQuery = defineQuery([Attack, Position])
+// Query for enemy entities
+export const enemyQuery = defineQuery([Enemy])
 
-// Query for entities with knockback effect
-export const knockbackQuery = defineQuery([Position, Knockback])
+// Query for monster entities
+export const monsterQuery = defineQuery([Monster])
 
-// Query for entities that can attack
-export const attackerQuery = defineQuery([Attack])
+// Query for monster entities of a specific type
+export const monsterTypeQuery = (type: number) => (world: any) => {
+  const monsters = monsterQuery(world)
+  return monsters.filter(entity => Monster.type[entity] === type)
+}
 
-// Query for entities that can be damaged
-export const damageableQuery = defineQuery([Health])
+// Query for monster entities of a specific level
+export const monsterLevelQuery = (level: number) => (world: any) => {
+  const monsters = monsterQuery(world)
+  return monsters.filter(entity => Monster.level[entity] === level)
+}
+
+// Query for monster entities of a specific type and level
+export const monsterTypeLevelQuery = (type: number, level: number) => (world: any) => {
+  const monsters = monsterQuery(world)
+  return monsters.filter(entity => 
+    Monster.type[entity] === type && 
+    Monster.level[entity] === level
+  )
+}

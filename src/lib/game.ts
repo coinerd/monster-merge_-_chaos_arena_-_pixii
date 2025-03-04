@@ -1,177 +1,262 @@
-import { createWorld, pipe } from 'bitecs'
-import { Subject } from 'rxjs'
+import { createWorld, addEntity, addComponent, removeEntity } from 'bitecs';
+import { Subject } from 'rxjs';
+import { Position, Velocity, Monster, Health, PlayerControlled } from './components';
+import { movementSystem } from './systems/movement';
+import { collisionSystem } from './systems/collision';
+import { combatSystem } from './systems/combat';
+import { mergeSystem } from './systems/merge';
+import { aiSystem } from './systems/ai';
+import { spawnSystem } from './systems/spawn';
+import { MonsterType } from './rendering/monster-sprites';
 
-// Import systems
-import { movementSystem, knockbackSystem, boundarySystem } from './systems/movement'
-import { collisionSystem } from './systems/collision'
-import { attackSystem, healthSystem } from './systems/combat'
-import { mergeSystem } from './systems/merge'
-import { aiSystem, aiAttackSystem } from './systems/ai'
-import { spawnSystem, createPlayerMonster } from './systems/spawn'
+// Game configuration
+export interface GameConfig {
+  arenaWidth: number;
+  arenaHeight: number;
+  baseSpawnInterval: number;
+  monsterTypes: number;
+  maxLevel: number;
+  initialPlayerMonsters: number;
+}
 
-// Import types
-import { GameWorld, GameConfig, GameEvent } from './types'
-
-// Default game configuration
+// Default configuration
 const DEFAULT_CONFIG: GameConfig = {
   arenaWidth: 800,
   arenaHeight: 600,
-  baseSpawnInterval: 3, // seconds
-  monsterTypes: 5,
+  baseSpawnInterval: 5,
+  monsterTypes: 4,
   maxLevel: 10,
   initialPlayerMonsters: 3
-}
+};
 
-export class MonsterMergeGame {
-  private world: GameWorld
-  private pipeline: (world: GameWorld) => GameWorld
-  private running: boolean = false
-  private lastTime: number = 0
+// Game event types
+export type GameEvent = 
+  | { type: 'MONSTER_CREATED', data: { entity: number, type: MonsterType, position: { x: number, y: number }, isPlayerControlled: boolean } }
+  | { type: 'MONSTER_MOVED', data: { entity: number, position: { x: number, y: number } } }
+  | { type: 'MONSTER_DAMAGED', data: { entity: number, damage: number, currentHealth: number } }
+  | { type: 'MONSTER_DIED', data: { entity: number, isPlayerControlled: boolean } }
+  | { type: 'MONSTER_MERGED', data: { survivor: number, removed: number, newLevel: number, isPlayerControlled: boolean } }
+  | { type: 'GAME_STARTED', data: null }
+  | { type: 'GAME_STOPPED', data: null }
+  | { type: 'GAME_RESET', data: null };
+
+// Game class
+export class Game {
+  private world: any;
+  private config: GameConfig;
+  private running = false;
+  private lastTime = 0;
+  private systems: Array<(world: any, delta: number) => void> = [];
   
-  // Observable for game events
-  public events$ = new Subject<GameEvent>()
+  // Event stream
+  public events$ = new Subject<GameEvent>();
   
   constructor(config: Partial<GameConfig> = {}) {
-    // Create world with custom properties
-    this.world = createWorld() as GameWorld
+    // Merge provided config with defaults
+    this.config = { ...DEFAULT_CONFIG, ...config };
     
-    // Initialize world properties
-    this.world.delta = 0
-    this.world.time = 0
-    this.world.events = []
-    this.world.deadEntities = []
-    this.world.entitiesToRemove = []
-    this.world.playerEntities = []
-    this.world.config = { ...DEFAULT_CONFIG, ...config }
+    // Initialize world
+    this.initWorld();
     
-    // Create system pipeline
-    this.pipeline = pipe(
-      // Time system (updates delta)
-      (world) => {
-        const now = performance.now()
-        world.delta = (now - this.lastTime) / 1000 // Convert to seconds
-        world.time += world.delta
-        this.lastTime = now
-        return world
-      },
-      // Game systems
-      spawnSystem,
-      aiSystem,
-      movementSystem,
-      knockbackSystem,
-      collisionSystem,
-      attackSystem,
-      aiAttackSystem,
-      mergeSystem,
-      healthSystem,
-      boundarySystem,
-      // Event system (emits events)
-      (world) => {
-        // Process and emit events
-        while (world.events.length > 0) {
-          const event = world.events.shift()
-          if (event) {
-            this.events$.next(event)
-          }
-        }
-        return world
-      }
-    )
+    // Initialize systems
+    this.initSystems();
+    
+    // Create initial player monsters
+    this.createInitialPlayerMonsters();
+  }
+  
+  private initWorld() {
+    // Create a new world
+    this.world = createWorld();
+    
+    // Add necessary properties to world
+    this.world.delta = 0;
+    this.world.time = 0;
+    this.world.events = [];
+    this.world.deadEntities = [];
+    this.world.entitiesToRemove = [];
+    this.world.playerEntities = [];
+    this.world.config = {
+      arenaWidth: this.config.arenaWidth,
+      arenaHeight: this.config.arenaHeight
+    };
+  }
+  
+  private initSystems() {
+    // Add all game systems
+    this.systems = [
+      movementSystem(this.config.arenaWidth, this.config.arenaHeight),
+      collisionSystem(),
+      combatSystem(this.events$),
+      mergeSystem(this.events$, this.config.maxLevel),
+      aiSystem(),
+      spawnSystem(this.config.arenaWidth, this.config.arenaHeight, this.config.baseSpawnInterval, this.config.monsterTypes, this.events$)
+    ];
+  }
+  
+  private createInitialPlayerMonsters() {
+    // Create initial player monsters
+    for (let i = 0; i < this.config.initialPlayerMonsters; i++) {
+      // Calculate position
+      const x = Math.random() * (this.config.arenaWidth * 0.8) + (this.config.arenaWidth * 0.1);
+      const y = Math.random() * (this.config.arenaHeight * 0.3) + (this.config.arenaHeight * 0.6);
+      
+      // Create monster
+      this.createPlayerMonster(x, y);
+    }
   }
   
   /**
-   * Initialize the game with starting entities
+   * Create a player-controlled monster
    */
-  public init(): void {
-    this.lastTime = performance.now()
+  public createPlayerMonster(x: number, y: number, type?: MonsterType): number {
+    // Create entity
+    const entity = addEntity(this.world);
     
-    // Create initial player monsters
-    const { arenaWidth, arenaHeight, initialPlayerMonsters } = this.world.config
+    // Determine monster type
+    const monsterType = type !== undefined ? type : Math.floor(Math.random() * this.config.monsterTypes) as MonsterType;
     
-    for (let i = 0; i < initialPlayerMonsters; i++) {
-      // Position in center area
-      const x = arenaWidth / 2 + (Math.random() * 100 - 50)
-      const y = arenaHeight / 2 + (Math.random() * 100 - 50)
-      
-      // Random monster type
-      const type = Math.floor(Math.random() * this.world.config.monsterTypes)
-      
-      // Create player monster
-      createPlayerMonster(this.world, x, y, type)
-    }
+    // Add components
+    addComponent(this.world, Position, entity);
+    Position.x[entity] = x;
+    Position.y[entity] = y;
+    
+    addComponent(this.world, Velocity, entity);
+    Velocity.x[entity] = 0;
+    Velocity.y[entity] = 0;
+    
+    addComponent(this.world, Monster, entity);
+    Monster.type[entity] = monsterType;
+    Monster.level[entity] = 1;
+    
+    addComponent(this.world, Health, entity);
+    Health.current[entity] = 100;
+    Health.max[entity] = 100;
+    
+    // Mark as player controlled
+    addComponent(this.world, PlayerControlled, entity);
+    
+    // Track player entities
+    this.world.playerEntities.push(entity);
+    
+    // Emit event
+    this.events$.next({
+      type: 'MONSTER_CREATED',
+      data: {
+        entity,
+        type: monsterType,
+        position: { x, y },
+        isPlayerControlled: true
+      }
+    });
+    
+    return entity;
+  }
+  
+  /**
+   * Move a player-controlled monster
+   */
+  public movePlayerMonster(entity: number, velocityX: number, velocityY: number): void {
+    Velocity.x[entity] = velocityX;
+    Velocity.y[entity] = velocityY;
+    
+    // Emit event
+    this.events$.next({
+      type: 'MONSTER_MOVED',
+      data: {
+        entity,
+        position: { x: Position.x[entity], y: Position.y[entity] }
+      }
+    });
   }
   
   /**
    * Start the game loop
    */
-  public start(): void {
-    if (this.running) return
-    
-    this.running = true
-    this.lastTime = performance.now()
-    this.tick()
+  public start() {
+    if (!this.running) {
+      this.running = true;
+      this.lastTime = performance.now();
+      
+      // Emit game started event
+      this.events$.next({
+        type: 'GAME_STARTED',
+        data: null
+      });
+      
+      // Start game loop
+      requestAnimationFrame(this.update.bind(this));
+    }
   }
   
   /**
    * Stop the game loop
    */
-  public stop(): void {
-    this.running = false
+  public stop() {
+    this.running = false;
+    
+    // Emit game stopped event
+    this.events$.next({
+      type: 'GAME_STOPPED',
+      data: null
+    });
   }
   
   /**
-   * Game loop tick
+   * Reset the game
    */
-  private tick = (): void => {
-    if (!this.running) return
+  public reset() {
+    // Stop the game
+    this.stop();
+    
+    // Initialize a new world
+    this.initWorld();
+    
+    // Reinitialize systems
+    this.initSystems();
+    
+    // Create initial player monsters
+    this.createInitialPlayerMonsters();
+    
+    // Emit game reset event
+    this.events$.next({
+      type: 'GAME_RESET',
+      data: null
+    });
+  }
+  
+  /**
+   * Game update loop
+   */
+  private update(time: number) {
+    if (!this.running) return;
+    
+    // Calculate delta time
+    const delta = (time - this.lastTime) / 1000;
+    this.lastTime = time;
+    
+    // Update world time
+    this.world.time += delta;
     
     // Run all systems
-    this.pipeline(this.world)
-    
-    // Schedule next tick
-    requestAnimationFrame(this.tick)
-  }
-  
-  /**
-   * Get current game state for rendering
-   */
-  public getState() {
-    return {
-      world: this.world,
-      time: this.world.time
+    for (const system of this.systems) {
+      system(this.world, delta);
     }
-  }
-  
-  /**
-   * Create a new player monster
-   */
-  public createPlayerMonster(x: number, y: number, type: number, level: number = 1): number {
-    return createPlayerMonster(this.world, x, y, type, level)
-  }
-  
-  /**
-   * Move a player monster
-   */
-  public movePlayerMonster(entityId: number, velocityX: number, velocityY: number): void {
-    const { Velocity } = require('./components')
     
-    if (Velocity.x[entityId] !== undefined) {
-      Velocity.x[entityId] = velocityX
-      Velocity.y[entityId] = velocityY
+    // Process world events
+    while (this.world.events.length > 0) {
+      const event = this.world.events.shift();
+      this.events$.next(event);
     }
-  }
-  
-  /**
-   * Get all entities with specific components
-   */
-  public getEntitiesWith(...componentQueries: any[]): number[] {
-    const { defineQuery } = require('bitecs')
-    const query = defineQuery(componentQueries)
-    return query(this.world)
+    
+    // Continue loop
+    requestAnimationFrame(this.update.bind(this));
   }
 }
 
-// Export factory function
-export function createGame(config?: Partial<GameConfig>): MonsterMergeGame {
-  return new MonsterMergeGame(config)
+/**
+ * Create a new game instance
+ */
+export function createGame(config?: Partial<GameConfig>): Game {
+  return new Game(config);
 }

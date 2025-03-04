@@ -1,91 +1,104 @@
 import { System } from '../types'
-import { attackerQuery, damageableQuery, healthQuery } from '../queries'
-import { Position, Attack, Health, Knockback } from '../components'
-import { addComponent, removeEntity } from 'bitecs'
+import { attackerQuery, damageableQuery, overlapQuery } from '../queries'
+import { Position, Attack, Health, Overlap, Knockback } from '../components'
+import { addComponent } from 'bitecs'
+import { Subject } from 'rxjs'
 
-export const attackSystem: System = (world) => {
+export const combatSystem = (events$: Subject<any>): System => (world: any, delta: number) => {
   const attackers = attackerQuery(world)
-  const targets = damageableQuery(world)
-  const delta = world.delta
   
-  // Update attack cooldowns
+  // Process attackers
   for (let i = 0; i < attackers.length; i++) {
     const attacker = attackers[i]
     
-    // Decrease cooldown timer
+    // Update attack cooldown
     if (Attack.timer[attacker] > 0) {
       Attack.timer[attacker] -= delta
     }
-  }
-  
-  // Process attacks
-  for (let i = 0; i < attackers.length; i++) {
-    const attacker = attackers[i]
     
-    // Skip if on cooldown
-    if (Attack.timer[attacker] > 0) continue
-    
-    const attackerX = Position.x[attacker]
-    const attackerY = Position.y[attacker]
-    const attackRange = Attack.range[attacker]
-    
-    // Check for targets in range
-    for (let j = 0; j < targets.length; j++) {
-      const target = targets[j]
+    // Check if can attack
+    if (Attack.timer[attacker] <= 0) {
+      // Find overlapping entities
+      const overlaps = overlapQuery(world)
       
-      // Skip self
-      if (target === attacker) continue
-      
-      const targetX = Position.x[target]
-      const targetY = Position.y[target]
-      
-      // Calculate distance
-      const dx = targetX - attackerX
-      const dy = targetY - attackerY
-      const distance = Math.sqrt(dx * dx + dy * dy)
-      
-      // If target is in range, attack it
-      if (distance <= attackRange) {
-        // Apply damage
-        const damage = Attack.damage[attacker]
-        Health.current[target] -= damage
+      for (let j = 0; j < overlaps.length; j++) {
+        const entity = overlaps[j]
         
-        // Apply knockback
-        addComponent(world, Knockback, target)
-        Knockback.force[target] = damage * 10 // Knockback force proportional to damage
-        Knockback.duration[target] = Math.atan2(dy, dx) // Direction of knockback
-        Knockback.remaining[target] = 0.2 // Duration in seconds
+        // Skip if not the attacker
+        if (entity !== attacker) continue
         
-        // Reset attack cooldown
-        Attack.timer[attacker] = Attack.cooldown[attacker]
+        // Get target entity
+        const target = Overlap.entity[entity]
         
-        // Only attack one target per cooldown
-        break
+        // Check if target has health
+        if (Health.current[target] !== undefined) {
+          // Calculate damage
+          const damage = Attack.damage[attacker]
+          
+          // Apply damage
+          Health.current[target] = Math.max(0, Health.current[target] - damage)
+          
+          // Reset attack timer
+          Attack.timer[attacker] = Attack.cooldown[attacker]
+          
+          // Apply knockback
+          if (!Knockback.remaining) {
+            addComponent(world, Knockback, target)
+          }
+          
+          // Calculate knockback direction
+          const dx = Position.x[target] - Position.x[attacker]
+          const dy = Position.y[target] - Position.y[attacker]
+          const angle = Math.atan2(dy, dx)
+          
+          Knockback.force[target] = 200
+          Knockback.direction[target] = angle
+          Knockback.remaining[target] = 0.2
+          
+          // Emit damage event
+          world.events.push({
+            type: 'MONSTER_DAMAGED',
+            data: {
+              entity: target,
+              damage,
+              currentHealth: Health.current[target],
+              position: {
+                x: Position.x[target],
+                y: Position.y[target]
+              }
+            }
+          })
+          
+          // Check if target died
+          if (Health.current[target] <= 0) {
+            // Add to dead entities list
+            world.deadEntities.push(target)
+            
+            // Emit death event
+            world.events.push({
+              type: 'MONSTER_DIED',
+              data: {
+                entity: target,
+                isPlayerControlled: world.playerEntities.includes(target)
+              }
+            })
+          }
+          
+          break
+        }
       }
-    }
-  }
-  
-  return world
-}
-
-export const healthSystem: System = (world) => {
-  const entities = healthQuery(world)
-  
-  // Check for dead entities
-  for (let i = 0; i < entities.length; i++) {
-    const entity = entities[i]
-    
-    // If health is depleted, mark for removal
-    if (Health.current[entity] <= 0) {
-      world.deadEntities.push(entity)
     }
   }
   
   // Remove dead entities
   while (world.deadEntities.length > 0) {
     const entity = world.deadEntities.pop()
-    if (entity !== undefined) {
-      removeEntity(world, entity)
+    world.entitiesToRemove.push(entity)
+    
+    // Remove from player entities if needed
+    const playerIndex = world.playerEntities.indexOf(entity)
+    if (playerIndex !== -1) {
+      world.playerEntities.splice(playerIndex, 1)
     }
   }
   

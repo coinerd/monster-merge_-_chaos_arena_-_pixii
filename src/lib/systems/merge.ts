@@ -1,70 +1,58 @@
 import { System } from '../types'
 import { mergeableOverlapQuery } from '../queries'
-import { Monster, Mergeable, Overlap, Health, Attack, Defense, Position, Collider } from '../components'
+import { Monster, Position, Health, Overlap } from '../components'
 import { removeEntity } from 'bitecs'
+import { Subject } from 'rxjs'
 
-export const mergeSystem: System = (world) => {
-  const entities = mergeableOverlapQuery(world)
+export const mergeSystem = (events$: Subject<any>, maxLevel: number): System => (world: any, delta: number) => {
+  const mergeables = mergeableOverlapQuery(world)
   
-  // Track processed entities to avoid double merging
-  const processed = new Set<number>()
-  
-  for (let i = 0; i < entities.length; i++) {
-    const entityA = entities[i]
-    
-    // Skip if already processed
-    if (processed.has(entityA)) continue
-    
+  // Process mergeable entities
+  for (let i = 0; i < mergeables.length; i++) {
+    const entityA = mergeables[i]
     const entityB = Overlap.entity[entityA]
     
-    // Skip if the other entity is already processed
-    if (processed.has(entityB)) continue
+    // Skip if already processed
+    if (world.entitiesToRemove.includes(entityA) || world.entitiesToRemove.includes(entityB)) {
+      continue
+    }
     
-    // Check if both entities are mergeable and of the same type and level
-    if (Mergeable.canMerge[entityA] === 1 && 
-        Mergeable.canMerge[entityB] === 1 && 
-        Monster.type[entityA] === Monster.type[entityB] &&
-        Monster.level[entityA] === Monster.level[entityB]) {
+    // Check if both entities are the same type and level
+    if (Monster.type[entityA] === Monster.type[entityB] && 
+        Monster.level[entityA] === Monster.level[entityB] &&
+        Monster.level[entityA] < maxLevel) {
       
-      // Perform merge: upgrade one entity, remove the other
-      const survivingEntity = entityA
-      const removedEntity = entityB
+      // Determine which entity to keep (survivor) and which to remove
+      const survivor = entityA
+      const removed = entityB
       
-      // Increase monster level
-      Monster.level[survivingEntity] += 1
+      // Increase level of survivor
+      Monster.level[survivor] += 1
       
-      // Enhance stats based on level increase
-      Health.max[survivingEntity] = Math.floor(Health.max[survivingEntity] * 1.5)
-      Health.current[survivingEntity] = Health.max[survivingEntity]
+      // Increase health of survivor
+      Health.max[survivor] *= 1.5
+      Health.current[survivor] = Health.max[survivor]
       
-      Attack.damage[survivingEntity] = Math.floor(Attack.damage[survivingEntity] * 1.3)
+      // Add removed entity to removal list
+      world.entitiesToRemove.push(removed)
       
-      if (Defense.value[survivingEntity] !== undefined) {
-        Defense.value[survivingEntity] = Math.floor(Defense.value[survivingEntity] * 1.2)
+      // Remove from player entities if needed
+      const playerIndex = world.playerEntities.indexOf(removed)
+      if (playerIndex !== -1) {
+        world.playerEntities.splice(playerIndex, 1)
       }
       
-      // Increase size
-      if (Collider.radius[survivingEntity] !== undefined) {
-        Collider.radius[survivingEntity] *= 1.2
-      }
-      
-      // Mark entities as processed
-      processed.add(entityA)
-      processed.add(entityB)
-      
-      // Add to removal queue
-      world.entitiesToRemove.push(removedEntity)
-      
-      // Emit merge event for rendering/effects
+      // Emit merge event
       world.events.push({
         type: 'MONSTER_MERGED',
         data: {
-          survivor: survivingEntity,
-          removed: removedEntity,
-          newLevel: Monster.level[survivingEntity],
+          survivor,
+          removed,
+          newLevel: Monster.level[survivor],
+          isPlayerControlled: world.playerEntities.includes(survivor),
           position: {
-            x: Position.x[survivingEntity],
-            y: Position.y[survivingEntity]
+            x: Position.x[survivor],
+            y: Position.y[survivor]
           }
         }
       })
@@ -74,9 +62,7 @@ export const mergeSystem: System = (world) => {
   // Remove entities marked for removal
   while (world.entitiesToRemove.length > 0) {
     const entity = world.entitiesToRemove.pop()
-    if (entity !== undefined) {
-      removeEntity(world, entity)
-    }
+    removeEntity(world, entity)
   }
   
   return world

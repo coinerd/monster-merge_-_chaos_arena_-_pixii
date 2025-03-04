@@ -3,7 +3,7 @@ import { colliderQuery, overlapQuery } from '../queries'
 import { Position, Collider, Overlap } from '../components'
 import { addComponent, removeComponent } from 'bitecs'
 
-export const collisionSystem: System = (world) => {
+export const collisionSystem = (): System => (world: any, delta: number) => {
   const entities = colliderQuery(world)
   
   // Clear previous overlaps

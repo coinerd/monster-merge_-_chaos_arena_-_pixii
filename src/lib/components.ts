@@ -1,69 +1,60 @@
-import { Types, defineComponent } from 'bitecs'
+import { defineComponent, Types } from 'bitecs'
 
-// Position and movement related components
+// Position component
 export const Position = defineComponent({
   x: Types.f32,
   y: Types.f32
 })
 
+// Velocity component
 export const Velocity = defineComponent({
   x: Types.f32,
   y: Types.f32
 })
 
-export const Knockback = defineComponent({
-  force: Types.f32,
-  duration: Types.f32,
-  remaining: Types.f32
-})
-
-// Monster attributes
+// Health component
 export const Health = defineComponent({
-  current: Types.i16,
-  max: Types.i16
+  current: Types.f32,
+  max: Types.f32
 })
 
+// Attack component
 export const Attack = defineComponent({
-  damage: Types.i16,
+  damage: Types.f32,
   range: Types.f32,
   cooldown: Types.f32,
   timer: Types.f32
 })
 
+// Defense component
 export const Defense = defineComponent({
-  value: Types.i16
+  value: Types.f32
 })
 
-// Monster type and merge mechanics
+// Monster component
 export const Monster = defineComponent({
-  type: Types.ui8,
+  type: Types.ui8, // 0: Fire, 1: Water, 2: Earth, 3: Air
   level: Types.ui8
 })
 
+// Mergeable component
 export const Mergeable = defineComponent({
-  canMerge: Types.ui8 // 0 = false, 1 = true
+  canMerge: Types.ui8 // 0: false, 1: true
 })
 
-// Collision detection
+// Collider component
 export const Collider = defineComponent({
   radius: Types.f32,
-  isTrigger: Types.ui8 // 0 = false, 1 = true
+  isTrigger: Types.ui8 // 0: false, 1: true
 })
 
+// Overlap component (for collision detection)
 export const Overlap = defineComponent({
   entity: Types.eid,
   duration: Types.f32
 })
 
-// AI and targeting
-export const AI = defineComponent({
-  state: Types.ui8, // 0 = idle, 1 = chase, 2 = attack, 3 = flee
-  targetEntity: Types.eid,
-  detectionRange: Types.f32,
-  decisionTimer: Types.f32
-})
-
-// Visual representation (for rendering layer to use)
+// Sprite component
 export const Sprite = defineComponent({
   typeId: Types.ui8,
   animationFrame: Types.ui8,
@@ -72,29 +63,23 @@ export const Sprite = defineComponent({
   opacity: Types.f32
 })
 
-// Tags for entity categorization
-export const PlayerControlled = defineComponent({})
-export const Enemy = defineComponent({})
-export const Item = defineComponent({
-  type: Types.ui8
-})
-export const Projectile = defineComponent({
-  sourceEntity: Types.eid,
-  lifetime: Types.f32
+// Player controlled component (tag)
+export const PlayerControlled = defineComponent()
+
+// Enemy component (tag)
+export const Enemy = defineComponent()
+
+// AI component
+export const AI = defineComponent({
+  state: Types.ui8, // 0: idle, 1: chase, 2: attack, 3: flee
+  targetEntity: Types.eid,
+  detectionRange: Types.f32,
+  decisionTimer: Types.f32
 })
 
-// Game state tracking
-export const Score = defineComponent({
-  value: Types.i32
-})
-
-export const Timer = defineComponent({
-  value: Types.f32
-})
-
-// Special effects
-export const StatusEffect = defineComponent({
-  type: Types.ui8, // 0 = none, 1 = poison, 2 = stun, 3 = speed boost, etc.
-  duration: Types.f32,
-  strength: Types.f32
+// Knockback component
+export const Knockback = defineComponent({
+  force: Types.f32,
+  direction: Types.f32,
+  remaining: Types.f32
 })
