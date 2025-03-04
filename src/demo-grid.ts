@@ -10,9 +10,14 @@ const DEBUG = true;
 // Debug logging function
 function debug(...args) {
   if (DEBUG) {
-    console.log('[DEBUG]', ...args);
+    console.log('[DEMO]', ...args);
   }
 }
+
+// Performance monitoring
+let lastFrameTime = 0;
+let frameCount = 0;
+let frameTimeTotal = 0;
 
 // Store references to DOM elements we create
 const createdElements = new Set<HTMLElement>();
@@ -39,7 +44,6 @@ function initializeDemo() {
     return;
   }
   
-  isInitialized = true;
   debug('Initializing demo');
   
   // Create app container
@@ -55,7 +59,7 @@ function initializeDemo() {
   `;
   debug('App container initialized');
 
-  // Create game container
+  // Create game container with explicit size and position
   const gameContainer = document.createElement('div');
   gameContainer.className = 'game-container';
   gameContainer.style.position = 'relative';
@@ -63,8 +67,10 @@ function initializeDemo() {
   gameContainer.style.height = '600px';
   gameContainer.style.margin = '0 auto';
   gameContainer.style.overflow = 'hidden';
-  gameContainer.style.border = '1px solid #666'; // Add border to see container
-  gameContainer.style.backgroundColor = '#333'; // Add background color
+  gameContainer.style.border = '1px solid #666';
+  gameContainer.style.backgroundColor = '#333';
+  
+  // Add to DOM
   appContainer.appendChild(gameContainer);
   createdElements.add(gameContainer);
   debug('Game container created and added to DOM');
@@ -159,6 +165,23 @@ function initializeDemo() {
       opacity: 1;
       transition: opacity 0.5s ease;
     }
+    
+    /* Add styles to prevent flickering */
+    .game-container {
+      backface-visibility: hidden;
+      transform: translateZ(0);
+      -webkit-font-smoothing: subpixel-antialiased;
+    }
+    
+    canvas {
+      display: block;
+      image-rendering: optimizeSpeed;
+      image-rendering: -moz-crisp-edges;
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: optimize-contrast;
+      image-rendering: pixelated;
+      -ms-interpolation-mode: nearest-neighbor;
+    }
   `;
   document.head.appendChild(style);
   createdElements.add(style);
@@ -249,6 +272,46 @@ function initializeDemo() {
     
     controlsContainer.appendChild(debugButton);
     createdElements.add(debugButton);
+    
+    // Add FPS counter
+    const fpsCounter = document.createElement('div');
+    fpsCounter.style.position = 'absolute';
+    fpsCounter.style.top = '10px';
+    fpsCounter.style.left = '10px';
+    fpsCounter.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+    fpsCounter.style.color = 'white';
+    fpsCounter.style.padding = '5px';
+    fpsCounter.style.borderRadius = '3px';
+    fpsCounter.style.fontFamily = 'monospace';
+    fpsCounter.style.fontSize = '12px';
+    fpsCounter.style.zIndex = '1000';
+    fpsCounter.textContent = 'FPS: --';
+    gameContainer.appendChild(fpsCounter);
+    createdElements.add(fpsCounter);
+    
+    // Update FPS counter
+    function updateFPS() {
+      const now = performance.now();
+      const deltaTime = now - lastFrameTime;
+      lastFrameTime = now;
+      
+      frameCount++;
+      frameTimeTotal += deltaTime;
+      
+      if (frameCount >= 30) {
+        const averageFrameTime = frameTimeTotal / frameCount;
+        const fps = Math.round(1000 / averageFrameTime);
+        fpsCounter.textContent = `FPS: ${fps}`;
+        
+        frameCount = 0;
+        frameTimeTotal = 0;
+      }
+      
+      requestAnimationFrame(updateFPS);
+    }
+    
+    // Start FPS counter
+    updateFPS();
   }
 
   // Add instructions
@@ -282,7 +345,7 @@ function initializeDemo() {
   initGameLogic(gameInstance);
   debug('Game logic initialized');
 
-  // Function to create the monster grid
+  // Function to create the monster grid - only called once
   function createMonsterGrid() {
     debug('Creating monster grid...');
     
@@ -431,9 +494,13 @@ function initializeDemo() {
   showNotification('Welcome to Monster Merge: Chaos Arena!', 'info');
 
   // Use a timeout to ensure PIXI is fully initialized before creating the grid
+  // This is critical to prevent flickering
   setTimeout(() => {
     debug('Creating monster grid after PIXI initialization');
     createMonsterGrid();
+    
+    // Mark as initialized after everything is set up
+    isInitialized = true;
   }, 500);
 }
 
@@ -445,7 +512,7 @@ export async function cleanup() {
   debug('Cleaning up demo-grid resources');
   
   try {
-    // Reset initialization flag
+    // Reset initialization flag first to prevent any new operations
     isInitialized = false;
     
     // Unsubscribe from all subscriptions
@@ -470,17 +537,6 @@ export async function cleanup() {
     });
     eventListeners.length = 0;
     
-    // Destroy PIXI resources
-    if (pixiRenderer) {
-      debug('Destroying PIXI renderer');
-      try {
-        await pixiRenderer.destroy();
-      } catch (error) {
-        console.error('Error destroying PIXI renderer:', error);
-      }
-      pixiRenderer = null;
-    }
-    
     // Stop game instance
     if (gameInstance) {
       debug('Stopping game instance');
@@ -490,6 +546,17 @@ export async function cleanup() {
         console.error('Error stopping game:', error);
       }
       gameInstance = null;
+    }
+    
+    // Destroy PIXI resources - do this AFTER stopping the game
+    if (pixiRenderer) {
+      debug('Destroying PIXI renderer');
+      try {
+        await pixiRenderer.destroy();
+      } catch (error) {
+        console.error('Error destroying PIXI renderer:', error);
+      }
+      pixiRenderer = null;
     }
     
     // Reset monster grid

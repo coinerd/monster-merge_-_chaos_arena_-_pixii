@@ -44,6 +44,7 @@ export class MonsterGrid {
   private shopItems: MonsterShopItem[] = [];
   private playerGold: number = 100; // Starting gold
   private goldText: PIXI.Text;
+  private isInitialized: boolean = false;
   
   // Observable for grid events
   public events$ = new Subject<GridEvent>();
@@ -101,10 +102,10 @@ export class MonsterGrid {
     });
     this.container.addChild(this.goldText);
     
-    // Initialize grid
+    // Initialize grid - only once
     this.initializeGrid();
     
-    // Initialize shop
+    // Initialize shop - only once
     this.initializeShop();
     
     // Position containers
@@ -115,6 +116,9 @@ export class MonsterGrid {
     
     // Set up event listeners
     this.setupEventListeners();
+    
+    // Mark as initialized
+    this.isInitialized = true;
     
     debug('MonsterGrid construction complete');
     

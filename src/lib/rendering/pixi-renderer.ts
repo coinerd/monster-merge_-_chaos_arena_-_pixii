@@ -5,6 +5,16 @@ import { EffectsManager } from './effects';
 import { UIManager } from './ui-manager';
 import { Subject } from 'rxjs';
 
+// Debug flag
+const DEBUG = true;
+
+// Debug logging function
+function debug(...args: any[]) {
+  if (DEBUG) {
+    console.log('[PIXI-RENDERER]', ...args);
+  }
+}
+
 export interface RendererOptions {
   width: number;
   height: number;
@@ -29,23 +39,30 @@ export class PixiRenderer {
   private canvasElement: HTMLCanvasElement | null = null;
   private parentElement: HTMLElement | null = null;
   private containerDiv: HTMLDivElement | null = null;
+  private frameCount: number = 0;
+  private lastFrameTime: number = 0;
+  private isRendering: boolean = false;
   
   // Observable for renderer events
   public events$ = new Subject<RendererEvent>();
 
   constructor(options: RendererOptions) {
-    console.log('Creating PixiRenderer with options:', options);
+    debug('Creating PixiRenderer with options:', options);
     
-    // Create PIXI application with explicit forceCanvas option
+    // Create PIXI application with stable configuration
     this.app = new PIXI.Application({
       width: options.width,
       height: options.height,
       backgroundColor: options.backgroundColor || 0x000000,
       antialias: options.antialias || false,
       transparent: options.transparent || false,
-      forceCanvas: false, // Try WebGL first
+      // Use WebGL by default, but allow fallback to canvas
+      forceCanvas: false,
       powerPreference: 'high-performance',
-      resolution: window.devicePixelRatio || 1
+      resolution: window.devicePixelRatio || 1,
+      // Disable auto-rendering - we'll control the render loop
+      autoDensity: true,
+      autoStart: false
     });
 
     // Store reference to canvas and parent
@@ -55,22 +72,30 @@ export class PixiRenderer {
     // Add to parent element if provided
     if (options.parentElement && this.canvasElement) {
       try {
-        // Check if we're in isolation mode
-        const isIsolationMode = document.documentElement.getAttribute('data-app-mode') === 'super-isolated';
-        
         // Always use container approach for better stability
-        // Create a container div that we'll never remove
         this.containerDiv = document.createElement('div');
         this.containerDiv.className = 'pixi-container';
         this.containerDiv.style.width = `${options.width}px`;
         this.containerDiv.style.height = `${options.height}px`;
         this.containerDiv.style.position = 'relative';
+        
+        // Apply styles to prevent flickering
+        this.containerDiv.style.overflow = 'hidden';
+        this.containerDiv.style.backgroundColor = '#333333';
+        
+        // Apply styles to canvas to prevent flickering
+        this.canvasElement.style.display = 'block';
+        this.canvasElement.style.position = 'absolute';
+        this.canvasElement.style.top = '0';
+        this.canvasElement.style.left = '0';
+        
+        // Add container to parent
         options.parentElement.appendChild(this.containerDiv);
         
         // Add canvas to the container
         this.containerDiv.appendChild(this.canvasElement);
         
-        console.log('Canvas added to container div');
+        debug('Canvas added to container div');
       } catch (error) {
         console.error('Error adding canvas to parent:', error);
       }
@@ -88,7 +113,56 @@ export class PixiRenderer {
     // Set up event listeners for canvas
     this.setupEventListeners();
     
-    console.log('PixiRenderer created successfully');
+    // Start our controlled render loop
+    this.startRenderLoop();
+    
+    debug('PixiRenderer created successfully');
+  }
+
+  /**
+   * Start the controlled render loop
+   */
+  private startRenderLoop(): void {
+    if (this.isRendering) return;
+    
+    this.isRendering = true;
+    this.lastFrameTime = performance.now();
+    this.frameCount = 0;
+    
+    const renderFrame = (timestamp: number) => {
+      if (this.isDestroyed || !this.isRendering) return;
+      
+      // Calculate delta time
+      const delta = timestamp - this.lastFrameTime;
+      this.lastFrameTime = timestamp;
+      
+      // Increment frame counter
+      this.frameCount++;
+      
+      // Log FPS every 60 frames if in debug mode
+      if (DEBUG && this.frameCount % 60 === 0) {
+        const fps = Math.round(1000 / delta);
+        debug(`FPS: ${fps}`);
+      }
+      
+      // Render a single frame
+      this.app.render();
+      
+      // Request next frame
+      requestAnimationFrame(renderFrame);
+    };
+    
+    // Start the render loop
+    requestAnimationFrame(renderFrame);
+    debug('Render loop started');
+  }
+
+  /**
+   * Stop the render loop
+   */
+  private stopRenderLoop(): void {
+    this.isRendering = false;
+    debug('Render loop stopped');
   }
 
   /**
@@ -114,7 +188,7 @@ export class PixiRenderer {
       });
     });
     
-    console.log('Event listeners set up for canvas');
+    debug('Event listeners set up for canvas');
   }
 
   /**
@@ -128,7 +202,7 @@ export class PixiRenderer {
    * Connect renderer to game world
    */
   public connectToWorld(world: any): void {
-    console.log('Connecting renderer to world');
+    debug('Connecting renderer to world');
     
     // Add any world-specific setup here
     // This is a placeholder for future implementation
@@ -138,7 +212,7 @@ export class PixiRenderer {
    * Resize the renderer
    */
   public resize(width: number, height: number): void {
-    console.log(`Resizing renderer to ${width}x${height}`);
+    debug(`Resizing renderer to ${width}x${height}`);
     
     if (this.isDestroyed) return;
     
@@ -294,17 +368,24 @@ export class PixiRenderer {
    * Destroy the renderer and clean up resources
    */
   public async destroy(): Promise<void> {
-    console.log('Destroying PixiRenderer');
+    debug('Destroying PixiRenderer');
     
     if (this.isDestroyed) {
-      console.log('Renderer already destroyed, skipping');
+      debug('Renderer already destroyed, skipping');
       return;
     }
     
+    // Mark as destroyed first to prevent further operations
     this.isDestroyed = true;
+    
+    // Stop the render loop
+    this.stopRenderLoop();
     
     // Clear all entity sprites
     this.entitySprites.clear();
+    
+    // Complete and close event subject
+    this.events$.complete();
     
     // Destroy PIXI application
     try {
@@ -313,8 +394,8 @@ export class PixiRenderer {
         this.canvasElement.style.display = 'none';
       }
       
-      // Complete and close event subject
-      this.events$.complete();
+      // Wait a frame before destroying to ensure any pending operations complete
+      await new Promise(resolve => setTimeout(resolve, 0));
       
       // Destroy the application with all resources
       this.app.destroy(true, { children: true, texture: true, baseTexture: true });
@@ -328,7 +409,7 @@ export class PixiRenderer {
       this.canvasElement = null;
       this.parentElement = null;
       
-      console.log('PixiRenderer destroyed successfully');
+      debug('PixiRenderer destroyed successfully');
     } catch (error) {
       console.error('Error destroying PIXI application:', error);
     }
